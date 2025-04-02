@@ -20,7 +20,7 @@ def count_movies_after_1999(films: Collection) -> int:
 def average_votes_2007(films: Collection):
     return films.aggregate([
         {"$match": {"year": 2007}},
-        {"$group": {"_id": None, "average_votes": {"$avg": "$votes"}}}
+        {"$group": {"_id": None, "average_votes": {"$avg": "$Votes"}}}
     ])
 
 # 4. Histogramme : films par année
@@ -36,21 +36,28 @@ def available_genres(films: Collection) -> List[str]:
 
 # 6. Film avec le plus de revenus
 def highest_revenue_movie(films: Collection):
-    return films.find().sort("revenue", -1).limit(1)
+    return films.find({
+        "Revenue (Millions)": {
+            "$ne": None,
+            "$ne": ""
+        }
+    }).sort("Revenue (Millions)", -1).limit(1)
+
 
 # 7. Réalisateurs avec plus de 5 films
 def prolific_directors(films: Collection):
     return films.aggregate([
-        {"$group": {"_id": "$director", "count": {"$sum": 1}}},
-        {"$match": {"count": {"$gt": 5}}},
+        {"$match": {"Director": {"$ne": None, "$ne": ""}}},
+        {"$group": {"_id": "$Director", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
     ])
+
 
 # 8. Genre le plus rentable en moyenne
 def most_profitable_genre(films: Collection):
     return films.aggregate([
         {"$unwind": "$genre"},
-        {"$group": {"_id": "$genre", "average_revenue": {"$avg": "$revenue"}}},
+        {"$group": {"_id": "$genre", "average_revenue": {"$avg": "$Revenue (Millions)"}}},
         {"$sort": {"average_revenue": -1}},
         {"$limit": 1}
     ])
@@ -59,10 +66,10 @@ def most_profitable_genre(films: Collection):
 def top_3_movies_per_decade(films: Collection):
     return films.aggregate([
         {"$addFields": {"decade": {"$concat": [{"$toString": {"$subtract": ["$year", {"$mod": ["$year", 10]}]}}, "s"]}}},
-        {"$sort": {"decade": 1, "rating": -1}},
+        {"$sort": {"decade": 1, "Metascore": -1}},
         {"$group": {
             "_id": "$decade",
-            "top_films": {"$push": {"title": "$title", "rating": "$rating"}}
+            "top_films": {"$push": {"title": "$title", "Metascore": "$Metascore"}}
         }},
         {"$project": {"top_3": {"$slice": ["$top_films", 3]}}}
     ])
@@ -71,27 +78,76 @@ def top_3_movies_per_decade(films: Collection):
 def longest_movie_by_genre(films: Collection):
     return films.aggregate([
         {"$unwind": "$genre"},
-        {"$sort": {"runtime": -1}},
+        {"$sort": {"Runtime (Minutes)": -1}},
         {"$group": {
-            "_id": "$genre",
+            "genre": "$genre",
             "film": {"$first": "$title"},
-            "runtime": {"$first": "$runtime"}
+            "Runtime (Minutes)": {"$first": "$Runtime (Minutes)"}
         }}
     ])
 
 # 11. Films avec Metascore > 80 et Revenue > 50M
 def filtered_view(films: Collection):
     return films.find({
-        "metascore": {"$gt": 80},
-        "revenue": {"$gt": 50000000}
+        "Metascore": {"$gt": 80},
+        "Revenue (Millions)": {"$gt": 50}
     })
 
 # 12. Runtime vs Revenue (récupération)
-def runtime_vs_revenue_data(films: Collection) -> List[Dict[str, Any]]:
-    return list(films.find(
-        {"runtime": {"$exists": True}, "revenue": {"$exists": True}},
-        {"runtime": 1, "revenue": 1, "_id": 0}
-    ))
+from typing import Collection
+import pandas as pd
+from scipy.stats import pearsonr
+
+def runtime_vs_revenue_data(films: Collection):
+    pipeline = [
+        {
+            "$project": {
+                "runtime": {
+                    "$convert": {
+                        "input": "$Runtime (Minutes)",
+                        "to": "int",
+                        "onError": None,
+                        "onNull": None
+                    }
+                },
+                "revenue": {
+                    "$convert": {
+                        "input": "$Revenue (Millions)",
+                        "to": "double",
+                        "onError": None,
+                        "onNull": None
+                    }
+                }
+            }
+        },
+        {
+            "$match": {
+                "runtime": {"$ne": None},
+                "revenue": {"$ne": None}
+            }
+        }
+    ]
+
+    data = list(films.aggregate(pipeline))
+    if not data:
+        print("Aucune donnée valide trouvée.")
+        return None
+
+    df = pd.DataFrame(data).dropna()
+
+    if df.empty:
+        print("Pas assez de données après filtrage.")
+        return None
+
+    corr, p_value = pearsonr(df["runtime"], df["revenue"])
+
+    print("Corrélation entre la durée et le revenu :")
+    print(f"Corrélation de Pearson : {corr:.4f}")
+    print(f"P-value : {p_value:.4g}")
+
+    return ""
+
+
 
 # 13. Durée moyenne par décennie
 def average_runtime_by_decade(films: Collection):
@@ -99,7 +155,7 @@ def average_runtime_by_decade(films: Collection):
         {"$addFields": {"decade": {"$subtract": ["$year", {"$mod": ["$year", 10]}]}}},
         {"$group": {
             "_id": "$decade",
-            "average_runtime": {"$avg": "$runtime"}
+            "average_runtime": {"$avg": "$Runtime (Minutes)"}
         }},
         {"$sort": {"_id": 1}}
     ])
@@ -111,12 +167,10 @@ def average_runtime_by_decade(films: Collection):
 
 from neo4j import Driver
 
-# Helper
 def run_query(driver: Driver, query: str):
     with driver.session() as session:
         return list(session.run(query))
 
-# 14. Acteur ayant joué dans le plus de films
 def most_featured_actor(driver: Driver):
     query = """
     MATCH (a:Actor)-[:A_JOUE]->(f:Film)
@@ -126,7 +180,6 @@ def most_featured_actor(driver: Driver):
     """
     return run_query(driver, query)
 
-# 15. Acteurs ayant joué avec Anne Hathaway
 def coactors_with_anne_hathaway(driver: Driver):
     query = """
     MATCH (a:Actor)-[:A_JOUE]->(f:Film)<-[:A_JOUE]-(anne:Actor {name: "Anne Hathaway"})
@@ -135,25 +188,24 @@ def coactors_with_anne_hathaway(driver: Driver):
     """
     return run_query(driver, query)
 
-# 16. Acteur ayant généré le plus de revenus
 def highest_grossing_actor(driver: Driver):
     query = """
     MATCH (a:Actor)-[:A_JOUE]->(f:Film)
+    WHERE f.revenue IS NOT NULL
     RETURN a.name AS actor, SUM(f.revenue) AS total_revenue
     ORDER BY total_revenue DESC
     LIMIT 1
     """
     return run_query(driver, query)
 
-# 17. Moyenne des votes
 def average_votes(driver: Driver):
     query = """
     MATCH (f:Film)
+    WHERE f.votes IS NOT NULL
     RETURN AVG(f.votes) AS average_votes
     """
     return run_query(driver, query)
 
-# 18. Genre le plus représenté
 def most_common_genre(driver: Driver):
     query = """
     MATCH (f:Film)-[:A_UN_GENRE]->(g:Genre)
@@ -163,7 +215,6 @@ def most_common_genre(driver: Driver):
     """
     return run_query(driver, query)
 
-# 19. Films dans lesquels les membres de ton groupe ont joué aussi
 def movies_with_group_members(driver: Driver, member_names: list):
     names_str = ', '.join(f'"{name}"' for name in member_names)
     query = f"""
@@ -173,7 +224,6 @@ def movies_with_group_members(driver: Driver, member_names: list):
     """
     return run_query(driver, query)
 
-# 20. Réalisateur ayant travaillé avec le plus d’acteurs différents
 def director_with_most_unique_actors(driver: Driver):
     query = """
     MATCH (r:Realisateur)-[:A_REALISE]->(f:Film)<-[:A_JOUE]-(a:Actor)
@@ -183,7 +233,6 @@ def director_with_most_unique_actors(driver: Driver):
     """
     return run_query(driver, query)
 
-# 21. Films les plus "connectés"
 def most_connected_films(driver: Driver):
     query = """
     MATCH (f:Film)<-[:A_JOUE]-(a:Actor)-[:A_JOUE]->(other:Film)
@@ -194,7 +243,6 @@ def most_connected_films(driver: Driver):
     """
     return run_query(driver, query)
 
-# 22. Acteurs ayant joué avec le plus de réalisateurs différents
 def actors_with_most_directors(driver: Driver):
     query = """
     MATCH (a:Actor)-[:A_JOUE]->(f:Film)<-[:A_REALISE]-(r:Realisateur)
@@ -204,7 +252,6 @@ def actors_with_most_directors(driver: Driver):
     """
     return run_query(driver, query)
 
-# 23. Recommander un film à un acteur selon ses genres préférés
 def recommend_by_genre(driver: Driver, actor_name: str):
     query = f"""
     MATCH (a:Actor {{name: "{actor_name}"}})-[:A_JOUE]->(:Film)-[:A_UN_GENRE]->(g:Genre)
@@ -216,7 +263,6 @@ def recommend_by_genre(driver: Driver, actor_name: str):
     """
     return run_query(driver, query)
 
-# 24. Relations d’influence entre réalisateurs
 def influence_between_directors(driver: Driver):
     query = """
     MATCH (r1:Realisateur)-[:A_REALISE]->(:Film)-[:A_UN_GENRE]->(g:Genre)<-[:A_UN_GENRE]-(:Film)<-[:A_REALISE]-(r2:Realisateur)
@@ -226,7 +272,6 @@ def influence_between_directors(driver: Driver):
     """
     return run_query(driver, query)
 
-# 25. Chemin le plus court entre deux acteurs
 def shortest_path_between_actors(driver: Driver, actor1: str, actor2: str):
     query = f"""
     MATCH p = shortestPath((a1:Actor {{name: "{actor1}"}})-[:A_JOUE*]-(a2:Actor {{name: "{actor2}"}}))
@@ -234,25 +279,42 @@ def shortest_path_between_actors(driver: Driver, actor1: str, actor2: str):
     """
     return run_query(driver, query)
 
-# 26. Détection de communautés d’acteurs
 def actor_communities(driver: Driver):
-    query = """
-    CALL gds.graph.project('actorGraph', 'Actor', {
-        A_JOUE: {
-            type: 'A_JOUE',
-            orientation: 'UNDIRECTED'
-        }
-    })
+    # Étape 1 : créer les relations COJOUE
+    query_create_cojoue = """
+    MATCH (a1:Actor)-[:A_JOUE]->(f:Film)<-[:A_JOUE]-(a2:Actor)
+    WHERE a1.name < a2.name
+    WITH a1, a2, COUNT(f) AS films_together
+    WHERE films_together >= 2
+    MERGE (a1)-[r:COJOUE]-(a2)
+    SET r.score = films_together
     """
-    run_query(driver, query)
 
-    query2 = """
-    CALL gds.louvain.stream('actorGraph')
-    YIELD nodeId, communityId
-    RETURN gds.util.asNode(nodeId).name AS actor, communityId
-    ORDER BY communityId
+    # Étape 2 : détecter les communautés (avec fix WHERE)
+    query_detect_communities = """
+    MATCH (a1:Actor)
+    WITH collect(a1) AS actors
+    UNWIND actors AS a1
+    UNWIND actors AS a2
+    WITH a1, a2
+    WHERE a1 <> a2
+    MATCH p = shortestPath((a1)-[:COJOUE*]-(a2))
+    WITH a1.name AS acteur_1, collect(DISTINCT a2.name) AS community
+    RETURN acteur_1, community
+    ORDER BY size(community) DESC
+    LIMIT 20
     """
-    return run_query(driver, query2)
+
+    try:
+        run_query(driver, query_create_cojoue)
+    except Exception as e:
+        print("⚠️ Erreur lors de la création des relations COJOUE :", e)
+
+    try:
+        return run_query(driver, query_detect_communities)
+    except Exception as e:
+        print("⚠️ Erreur lors de la détection des communautés :", e)
+        return []
 
 
 # cross_queries.py
@@ -303,14 +365,45 @@ def create_competition_relationships(driver: Driver):
 
 # 30. Collaborations fréquentes entre réalisateurs et acteurs + succès commercial ou critique
 def frequent_collabs_and_success(driver: Driver):
-    query = """
-    MATCH (a:Actor)-[:A_JOUE]->(f:Film)<-[:A_REALISE]-(r:Realisateur)
-    WITH a, r, COUNT(f) AS collaborations, 
-         AVG(f.revenue) AS avg_revenue, AVG(f.rating) AS avg_rating
-    WHERE collaborations > 1
-    RETURN a.name AS Actor, r.name AS Director, collaborations, 
-           avg_revenue, avg_rating
-    ORDER BY collaborations DESC, avg_revenue DESC
+    query_create_collabs = """
+    MATCH (r:Realisateur)-[:A_REALISE]->(f:Film)<-[:A_JOUE]-(a:Actor)
+    WHERE f.`Revenue (Millions)` IS NOT NULL AND f.`Revenue (Millions)` <> ""
+    OR f.Metascore IS NOT NULL AND f.Metascore <> ""
+    WITH r, a,
+        COUNT(DISTINCT f) AS nb_collabs,
+        SUM(
+            CASE WHEN f.`Revenue (Millions)` IS NOT NULL AND f.`Revenue (Millions)` <> "" 
+                THEN toFloat(f.`Revenue (Millions)`) ELSE 0 END
+        ) AS total_revenue,
+        SUM(
+            CASE WHEN f.Metascore IS NOT NULL AND f.Metascore <> "" 
+                THEN toInteger(f.Metascore) ELSE 0 END
+        ) AS total_metascore
+    MERGE (r)-[c:COLLAB_AVEC]->(a)
+    SET c.count = nb_collabs,
+        c.total_revenue = total_revenue,
+        c.total_metascore = total_metascore
+    """
+    query_extract_top = """
+    MATCH (r:Realisateur)-[c:COLLAB_AVEC]->(a:Actor)
+    WHERE c.count >= 2
+    RETURN 
+        r.name AS realisateur,
+        a.name AS acteur,
+        c.count AS nb_collaborations,
+        round(c.total_revenue / c.count, 2) AS revenue_moyen,
+        round(c.total_metascore / c.count, 1) AS metascore_moyen
+    ORDER BY nb_collaborations DESC, revenue_moyen DESC
     LIMIT 20
     """
-    return run_query(driver, query)
+
+    try:
+        run_query(driver, query_create_collabs)
+    except Exception as e:
+        print("Erreur lors de la création des relations COLLAB_AVEC :", e)
+
+    try:
+        return run_query(driver, query_extract_top)
+    except Exception as e:
+        print("Erreur lors de l'extraction des collaborations :", e)
+        return []

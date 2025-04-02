@@ -9,7 +9,7 @@ def connect_mongo():
 
 def connect_neo4j():
     """Établit une connexion à Neo4j et retourne un driver."""
-    return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD),database="films")
 
 if __name__ == "__main__":
     try:
