@@ -1,3 +1,6 @@
+Lucca MASI
+NAoki Ferrandez
+
 Create the environnement : python -m venv venv
 
 install all the requirements : pip install -r requirements.txt
