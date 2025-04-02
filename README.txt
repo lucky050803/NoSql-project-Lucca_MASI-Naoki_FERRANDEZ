@@ -1,5 +1,5 @@
 Lucca MASI
-NAoki Ferrandez
+Naoki FERRANDEZ
 
 Create the environnement : python -m venv venv
 
@@ -11,3 +11,4 @@ install all the requirements : pip install -r requirements.txt
 --> app.py : main script of the project
 --> connexion.py : create the connexion to the databases
 --> queries.py : all the different queries called
+--> reponse.txt : result of all the queries. 
